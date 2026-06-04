@@ -22,7 +22,7 @@ source=(
 source_x86_64=(
     "${pkgname%-compatible-bin}-${pkgver}-${arch}.deb::${url}/releases/download/v${_pkgver}/${_pkgname}-${_pkgver%-pre*}-linux-amd64-compatible.deb"
 )
-sha256sums=('3b8311438e88f47eb507322a43c7a4156bfebb8c0f6e7b7436ef70842fb4c745')
+sha256sums=('efe4503308a1e4e44b892065b6fb8f582bd2f7d01e3f0232e4d86539101ebbb5')
 sha256sums_x86_64=('43a03710ced6d91edbabe3c042c1f571b7cdf7bdf40b3e157b12f8147feb5bf6')
 
 prepare() {
