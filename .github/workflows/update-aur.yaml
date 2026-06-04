@@ -89,13 +89,12 @@ jobs:
           script_sha256="$(sha256sum bettbox.sh | cut -d' ' -f1)"
           echo "script SHA256: $script_sha256"
 
-          # --- Download the compatible .deb ---
-          gh release download "$TAG" \
+          # --- Get SHA256 of the compatible .deb via API ---
+          deb_sha256="$(gh release view "$TAG" \
             --repo appshubcc/Bettbox \
-            --pattern "*-linux-amd64-compatible.deb" \
-            --output "package.deb"
-          deb_sha256="$(sha256sum package.deb | cut -d' ' -f1)"
-          rm -f package.deb
+            --json assets \
+            --jq '[.assets[] | select(.name | contains("linux-amd64-compatible.deb")) | .digest] | first' | \
+            sed 's/^sha256://')"
           echo "deb SHA256: $deb_sha256"
 
           # --- Patch PKGBUILD ---
