@@ -29,9 +29,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Find the latest non-draft release with a compatible Linux deb
+          # Find the latest non-draft stable release with a compatible Linux deb
           latest_tag=""
           while IFS= read -r tag; do
+            # skip pre-release tags (contain '-pre')
+            case "$tag" in *-pre*) continue ;; esac
             asset_count=$(gh release view "$tag" \
               --repo appshubcc/Bettbox \
               --json assets \
@@ -47,7 +49,7 @@ jobs:
             --jq '.[] | select(.isDraft == false) | .tagName')
 
           if [ -z "$latest_tag" ]; then
-            echo "No upstream releases with compatible deb found"
+            echo "No upstream stable releases with compatible deb found"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -56,18 +58,17 @@ jobs:
 
           upstream_ver="${latest_tag#v}"
           # Convert pre-release format: 1.17.10-pre1 -> 1.17.10.pre1
-          arch_ver="$(echo "$upstream_ver" | sed 's/-pre/.pre/; s/-/.pre/')"
+          # arch_ver="$(echo "$upstream_ver" | sed 's/-pre/.pre/; s/-/.pre/')"
 
           cur_ver="$(sed -n 's/^pkgver=//p' PKGBUILD)"
-          echo "cur_ver=$cur_ver  upstream_ver=$arch_ver"
+          echo "cur_ver=$cur_ver  upstream_ver=$upstream_ver"
 
-          if [ "$arch_ver" = "$cur_ver" ] && [ "${{ inputs.force }}" != "true" ]; then
+          if [ "$upstream_ver" = "$cur_ver" ] && [ "${{ inputs.force }}" != "true" ]; then
             echo "Version unchanged, skipping"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "new_version=$arch_ver" >> "$GITHUB_OUTPUT"
-            echo "upstream_version=$upstream_ver" >> "$GITHUB_OUTPUT"
+            echo "new_version=$upstream_ver" >> "$GITHUB_OUTPUT"
             echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
           fi
 
@@ -77,14 +78,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NEW_VER: ${{ steps.check.outputs.new_version }}
           TAG: ${{ steps.check.outputs.latest_tag }}
-          UPSTREAM_VER: ${{ steps.check.outputs.upstream_version }}
         run: |
           set -euo pipefail
 
           pkgname="bettbox-compatible-bin"
           _pkgname="Bettbox"
           arch="x86_64"
-          url_version="${UPSTREAM_VER%%-pre*}"
 
           # --- SHA256 of the wrapper script ---
           script_sha256="$(sha256sum bettbox.sh | cut -d' ' -f1)"
@@ -127,7 +126,7 @@ jobs:
             printf '\tdepends = libkeybinder3\n'
             printf '\tsource = %s.sh\n' "$pkgname"
             printf '\tsource_x86_64 = %s-%s-%s.deb::https://github.com/appshubcc/Bettbox/releases/download/v%s/%s-%s-linux-amd64-compatible.deb\n' \
-              "$pkgname" "$NEW_VER" "$arch" "$UPSTREAM_VER" "$_pkgname" "$url_version"
+              "$pkgname" "$NEW_VER" "$arch" "$NEW_VER" "$_pkgname" "$NEW_VER"
             printf '\tsha256sums = %s\n' "$script_sha256"
             printf '\tsha256sums_x86_64 = %s\n' "$deb_sha256"
           } > .SRCINFO
