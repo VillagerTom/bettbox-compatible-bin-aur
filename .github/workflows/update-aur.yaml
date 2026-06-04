@@ -1,0 +1,170 @@
+name: Update AUR package
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Force update even if version is the same
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Check for new upstream release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Find the latest non-draft release with a compatible Linux deb
+          latest_tag=""
+          while IFS= read -r tag; do
+            asset_count=$(gh release view "$tag" \
+              --repo appshubcc/Bettbox \
+              --json assets \
+              --jq '[.assets[] | select(.name | contains("linux-amd64-compatible"))] | length')
+            if [ "$asset_count" -gt 0 ]; then
+              latest_tag="$tag"
+              break
+            fi
+          done < <(gh release list \
+            --repo appshubcc/Bettbox \
+            --limit 30 \
+            --json tagName,isDraft \
+            --jq '.[] | select(.isDraft == false) | .tagName')
+
+          if [ -z "$latest_tag" ]; then
+            echo "No upstream releases with compatible deb found"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Latest upstream tag: $latest_tag"
+
+          upstream_ver="${latest_tag#v}"
+          # Convert pre-release format: 1.17.10-pre1 -> 1.17.10.pre1
+          arch_ver="$(echo "$upstream_ver" | sed 's/-pre/.pre/; s/-/.pre/')"
+
+          cur_ver="$(sed -n 's/^pkgver=//p' PKGBUILD)"
+          echo "cur_ver=$cur_ver  upstream_ver=$arch_ver"
+
+          if [ "$arch_ver" = "$cur_ver" ] && [ "${{ inputs.force }}" != "true" ]; then
+            echo "Version unchanged, skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "new_version=$arch_ver" >> "$GITHUB_OUTPUT"
+            echo "upstream_version=$upstream_ver" >> "$GITHUB_OUTPUT"
+            echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update PKGBUILD and .SRCINFO
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_VER: ${{ steps.check.outputs.new_version }}
+          TAG: ${{ steps.check.outputs.latest_tag }}
+          UPSTREAM_VER: ${{ steps.check.outputs.upstream_version }}
+        run: |
+          set -euo pipefail
+
+          pkgname="bettbox-compatible-bin"
+          _pkgname="Bettbox"
+          arch="x86_64"
+          url_version="${UPSTREAM_VER%%-pre*}"
+
+          # --- SHA256 of the wrapper script ---
+          script_sha256="$(sha256sum bettbox.sh | cut -d' ' -f1)"
+          echo "script SHA256: $script_sha256"
+
+          # --- Download the compatible .deb ---
+          gh release download "$TAG" \
+            --repo appshubcc/Bettbox \
+            --pattern "*-linux-amd64-compatible.deb" \
+            --output "package.deb"
+          deb_sha256="$(sha256sum package.deb | cut -d' ' -f1)"
+          rm -f package.deb
+          echo "deb SHA256: $deb_sha256"
+
+          # --- Patch PKGBUILD ---
+          sed -i \
+            -e "s/^pkgver=.*/pkgver=${NEW_VER}/" \
+            -e "s/^pkgrel=.*/pkgrel=1/" \
+            -e "s|^provides=(\"${pkgname%-compatible-bin}=.*\")|provides=(\"${pkgname%-compatible-bin}=${NEW_VER}\")|" \
+            -e "s/^sha256sums=.*/sha256sums=('${script_sha256}')/" \
+            -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${deb_sha256}')/" \
+            PKGBUILD
+          echo "=== Updated PKGBUILD ==="
+          grep -E '^(pkgver|pkgrel|provides|sha256)' PKGBUILD
+
+          # --- Generate .SRCINFO ---
+          {
+            printf 'pkgbase = %s\n' "$pkgname"
+            printf '\tpkgdesc = A multi-platform proxy client powered by the Mihomo (Clash Meta) core, refactored based on early versions of FlClash. (Build with GOAMD64=v1)\n'
+            printf '\tpkgver = %s-1\n' "$NEW_VER"
+            printf '\tpkgrel = 1\n'
+            printf '\turl = https://github.com/appshubcc/Bettbox\n'
+            printf '\tarch = %s\n' "$arch"
+            printf '\tlicense = GPL-3.0-only\n'
+            printf '\tconflict = bettbox\n'
+            printf '\tconflict = bettbox-bin\n'
+            printf '\tprovides = bettbox=%s\n' "$NEW_VER"
+            printf '\toptions = !debug\n'
+            printf '\tdepends = libayatana-appindicator\n'
+            printf '\tdepends = libkeybinder3\n'
+            printf '\tsource = %s.sh\n' "$pkgname"
+            printf '\tsource_x86_64 = %s-%s-%s.deb::https://github.com/appshubcc/Bettbox/releases/download/v%s/%s-%s-linux-amd64-compatible.deb\n' \
+              "$pkgname" "$NEW_VER" "$arch" "$UPSTREAM_VER" "$_pkgname" "$url_version"
+            printf '\tsha256sums = %s\n' "$script_sha256"
+            printf '\tsha256sums_x86_64 = %s\n' "$deb_sha256"
+          } > .SRCINFO
+          echo "=== Generated .SRCINFO ==="
+          cat .SRCINFO
+
+      - name: Push to AUR
+        if: steps.check.outputs.skip == 'false'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          pkgname="bettbox-compatible-bin"
+          new_ver="${{ steps.check.outputs.new_version }}"
+
+          mkdir -p -m 0700 ~/.ssh
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+
+          tmpdir="$(mktemp -d)"
+          git clone "ssh://aur@aur.archlinux.org/${pkgname}.git" "$tmpdir/aur"
+
+          cp PKGBUILD bettbox.sh .SRCINFO "$tmpdir/aur/"
+
+          cd "$tmpdir/aur"
+          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add PKGBUILD bettbox.sh .SRCINFO
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update to v${new_ver}"
+            GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes" git push
+          fi
+
+          rm -rf "$tmpdir"
