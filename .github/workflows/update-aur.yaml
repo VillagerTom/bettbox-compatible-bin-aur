@@ -112,7 +112,7 @@ jobs:
           {
             printf 'pkgbase = %s\n' "$pkgname"
             printf '\tpkgdesc = A multi-platform proxy client powered by the Mihomo (Clash Meta) core, refactored based on early versions of FlClash. (Build with GOAMD64=v1)\n'
-            printf '\tpkgver = %s-1\n' "$NEW_VER"
+            printf '\tpkgver = %s\n' "$NEW_VER"
             printf '\tpkgrel = 1\n'
             printf '\turl = https://github.com/appshubcc/Bettbox\n'
             printf '\tarch = %s\n' "$arch"
