@@ -134,6 +134,22 @@ jobs:
           echo "=== Generated .SRCINFO ==="
           cat .SRCINFO
 
+      - name: Commit back to this repo
+        if: steps.check.outputs.skip == 'false'
+        env:
+          NEW_VER: ${{ steps.check.outputs.new_version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update to v${NEW_VER}"
+            git push
+          fi
+
       - name: Push to AUR
         if: steps.check.outputs.skip == 'false'
         env:
