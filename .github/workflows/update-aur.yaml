@@ -2,7 +2,7 @@ name: Update AUR package
 
 on:
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '30 4,16 * * *'
   workflow_dispatch:
     inputs:
       force:
