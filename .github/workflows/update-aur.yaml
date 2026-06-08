@@ -166,7 +166,7 @@ jobs:
           chmod 600 ~/.ssh/aur
 
           tmpdir="$(mktemp -d)"
-          git clone "ssh://aur@aur.archlinux.org/${pkgname}.git" "$tmpdir/aur"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes" git clone "ssh://aur@aur.archlinux.org/${pkgname}.git" "$tmpdir/aur"
 
           cp PKGBUILD bettbox.sh .SRCINFO "$tmpdir/aur/"
 
