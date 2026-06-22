@@ -1,6 +1,11 @@
 name: Update AUR package
 
 on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - '.github/**'
   schedule:
     - cron: '30 4,16 * * *'
   workflow_dispatch:
@@ -11,8 +16,15 @@ on:
         type: boolean
         default: false
 
+permissions: {}
+
+concurrency:
+  group: update-aur
+  cancel-in-progress: false
+
 jobs:
-  update:
+  update-version:
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -152,35 +164,52 @@ jobs:
 
       - name: Push to AUR
         if: steps.check.outputs.skip == 'false'
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        uses: ./.github/actions/push-to-aur
+        with:
+          ssh-private-key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit-message: Update to v${{ steps.check.outputs.new_version }}
+
+  push-modifications:
+    if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Ensure pkgrel changed
         run: |
           set -euo pipefail
 
-          pkgname="bettbox-compatible-bin"
-          new_ver="${{ steps.check.outputs.new_version }}"
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
 
-          mkdir -p -m 0700 ~/.ssh
-          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
-          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
+          # Check there is a diff in PKGBUILD or .SRCINFO
+          git diff "$BEFORE" "$AFTER" -- PKGBUILD .SRCINFO > /dev/null 2>&1 || {
+            echo "Error: no changes to PKGBUILD or .SRCINFO in this push"
+            exit 1
+          }
 
-          tmpdir="$(mktemp -d)"
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes" git clone "ssh://aur@aur.archlinux.org/${pkgname}.git" "$tmpdir/aur"
+          # Extract the new pkgrel value from each file
+          pkgrel_pkgbuild=$(git diff "$BEFORE" "$AFTER" -- PKGBUILD | sed -n 's/^+pkgrel=//p')
+          pkgrel_srcinfo=$(git diff "$BEFORE" "$AFTER" -- .SRCINFO | sed -n 's/^+[[:space:]]*pkgrel[[:space:]]*=[[:space:]]*//p')
 
-          cp PKGBUILD bettbox.sh .SRCINFO "$tmpdir/aur/"
+          # Verify both files modified pkgrel
+          [ -n "$pkgrel_pkgbuild" ] || { echo "Error: pkgrel not modified in PKGBUILD"; exit 1; }
+          [ -n "$pkgrel_srcinfo" ] || { echo "Error: pkgrel not modified in .SRCINFO"; exit 1; }
 
-          cd "$tmpdir/aur"
-          git config user.name "VillagerTom"
-          git config user.email "villager-tom@proton.me"
+          # Verify they match
+          [ "$pkgrel_pkgbuild" = "$pkgrel_srcinfo" ] || {
+            echo "Error: pkgrel mismatch — PKGBUILD has '$pkgrel_pkgbuild', .SRCINFO has '$pkgrel_srcinfo'"
+            exit 1
+          }
 
-          git add PKGBUILD bettbox.sh .SRCINFO
+          echo "pkgrel consistency check passed: pkgrel=$pkgrel_pkgbuild"
 
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Update to v${new_ver}"
-            GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes" git push
-          fi
-
-          rm -rf "$tmpdir"
+      - name: Push to AUR
+        uses: ./.github/actions/push-to-aur
+        with:
+          ssh-private-key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit-message: ${{ join(github.event.commits.*.message, '\n---\n') }}
