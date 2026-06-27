@@ -97,10 +97,6 @@ jobs:
           _pkgname="Bettbox"
           arch="x86_64"
 
-          # --- SHA256 of the wrapper script ---
-          script_sha256="$(sha256sum bettbox.sh | cut -d' ' -f1)"
-          echo "script SHA256: $script_sha256"
-
           # --- Get SHA256 of the compatible .deb via API ---
           deb_sha256="$(gh release view "$TAG" \
             --repo appshubcc/Bettbox \
@@ -114,7 +110,6 @@ jobs:
             -e "s/^pkgver=.*/pkgver=${NEW_VER}/" \
             -e "s/^pkgrel=.*/pkgrel=1/" \
             -e "s|^provides=(\"${pkgname%-compatible-bin}=.*\")|provides=(\"${pkgname%-compatible-bin}=${NEW_VER}\")|" \
-            -e "s/^sha256sums=.*/sha256sums=('${script_sha256}')/" \
             -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${deb_sha256}')/" \
             PKGBUILD
           echo "=== Updated PKGBUILD ==="
@@ -136,8 +131,6 @@ jobs:
             for p in "${provides[@]}"; do echo "	provides = $p"; done
             for c in "${conflicts[@]}"; do echo "	conflicts = $c"; done
             for o in "${options[@]}"; do echo "	options = $o"; done
-            for s in "${_source[@]}"; do echo "	source = $s"; done
-            for s in "${sha256sums[@]}"; do echo "	sha256sums = $s"; done
             for s in "${_source_x86_64[@]}"; do echo "	source_x86_64 = $s"; done
             for s in "${sha256sums_x86_64[@]}"; do echo "	sha256sums_x86_64 = $s"; done
             echo "pkgname = ${pkgname}"
