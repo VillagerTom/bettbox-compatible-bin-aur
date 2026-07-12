@@ -131,6 +131,8 @@ jobs:
             for p in "${provides[@]}"; do echo "	provides = $p"; done
             for c in "${conflicts[@]}"; do echo "	conflicts = $c"; done
             for o in "${options[@]}"; do echo "	options = $o"; done
+            for s in "${_source[@]}"; do echo "	source = $s"; done
+            for s in "${sha256sums[@]}"; do echo "	sha256sums = $s"; done
             for s in "${_source_x86_64[@]}"; do echo "	source_x86_64 = $s"; done
             for s in "${sha256sums_x86_64[@]}"; do echo "	sha256sums_x86_64 = $s"; done
             echo "pkgname = ${pkgname}"
